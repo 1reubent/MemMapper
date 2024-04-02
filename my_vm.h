@@ -1,4 +1,6 @@
 #include <stddef.h>
+#include <sys/mman.h>
+
 
 #define MAX_MEMSIZE (1UL<<32)
 #define MEMSIZE (1UL<<30)
