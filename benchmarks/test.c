@@ -1,6 +1,7 @@
 #include <stdio.h>
 #include <unistd.h>
-#include "my_vm.h"
+#include <stdint.h>
+#include "../my_vm.h"
 
 
 int main(int argc, char **argv)

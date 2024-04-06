@@ -1,5 +1,4 @@
 #include "my_vm.h"
-#include <math.h>
 #include <stdlib.h>
 #include <stdio.h>
 #include <stdint.h>
@@ -79,7 +78,7 @@ static int get_next_avail(int virtOrphys, unsigned int* toStoreIndex, int numOfP
 
         
     }
-    unsigned int index = (unsigned int)log2((numFlip) & ( (*num) + 1));
+    unsigned int index = (unsigned int)__builtin_ffs((numFlip) & ( (*num) + 1));
         //these operations shouldn't change the actual bitmap right? TODO FIX
     *toStoreIndex = index;
     return 0;//success
@@ -108,7 +107,7 @@ void set_physical_mem(){
     page0Int = (int*) memory;
 
     //find num of offset bits
-    numOffsetBits = log2(PAGE_SIZE);
+    numOffsetBits = __builtin_ffs(PAGE_SIZE);
 
     //init top level page table; store in page 0 of phys. mem.
     
@@ -117,11 +116,11 @@ void set_physical_mem(){
         // int numofPTEs = (MAX_MEMSIZE) / (PAGE_SIZE); //also the num of pages in VAS
         // int numPagesforPT = ( (numofPTEs) * (PTE_SIZE) ) / (PAGE_SIZE); // this is the num of elements in top-level PT
     numOfPTEsInOnePage = (PAGE_SIZE) / (PTE_SIZE);
-    numOuterBits = log2(numOfPTEsInOnePage);
+    numOuterBits = __builtin_ffs(numOfPTEsInOnePage);
 
     //find number of inner page bits
         //numOfPTEsIn2ndLevel = (PAGE_SIZE) / (PTE_SIZE);
-    numInnerBits = log2(numOfPTEsInOnePage);
+    numInnerBits = __builtin_ffs(numOfPTEsInOnePage);
     
     //if num of bits dont add up to 32
     if(numOffsetBits + numInnerBits + numOuterBits < 32){
