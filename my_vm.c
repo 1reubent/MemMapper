@@ -318,7 +318,8 @@ void * t_malloc(size_t n){
         set_physical_mem();
     }
 
-    int numOfPagesToAlloc = (int) ceil(((double) n) / PAGE_SIZE); //min num of pages needed
+    int numOfPagesToAlloc = (n+ PAGE_SIZE -1) / PAGE_SIZE;  //min num of pages needed. another way to do ceil().
+    //(int) ceil(((double) n) / PAGE_SIZE); 
     ;
     //allocate virtual page(s)
 
@@ -375,7 +376,8 @@ int t_free(unsigned int vp, size_t n){
         return -1;
     }
     //find num pages to be freed
-    int numOfPagesToFree = (int) ceil(((double) n) / PAGE_SIZE);
+    int numOfPagesToFree =  (n+ PAGE_SIZE -1) / PAGE_SIZE;
+    //(int) ceil(((double) n) / PAGE_SIZE);
 
     /*FOR EACH PAGE TO BE FREED...*/
     for(int i=0; i<numOfPagesToFree; i++){
