@@ -6,6 +6,7 @@
         "string": "c",
         "string_view": "c",
         "vector": "c",
-        "chrono": "c"
+        "chrono": "c",
+        "stdint.h": "c"
     }
 }

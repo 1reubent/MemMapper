@@ -2,8 +2,8 @@
 #include <sys/mman.h>
 
 
-#define MAX_MEMSIZE (1UL<<32)
-#define MEMSIZE (1UL<<30)
+#define MAX_MEMSIZE (1ULL<<32)
+#define MEMSIZE (1ULL<<30)
 #define TLB_ENTRIES 256
 
 
