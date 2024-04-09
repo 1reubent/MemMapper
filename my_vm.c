@@ -495,9 +495,9 @@ int put_value(unsigned int vp, void *val, size_t n){
         /*COPY DATA*/
         char* toCopy = (char*) val;
         for(j=0; j<n && j<PAGE_SIZE; j++){
-            #ifdef DEBUG
-                printf("putting: %c \n",toCopy[j+ (i*PAGE_SIZE)]);
-            #endif
+            // #ifdef DEBUG
+            //     printf("putting: %c \n",toCopy[j+ (i*PAGE_SIZE)]);
+            // #endif
             physicalAddress[j] = toCopy[j+ (i*PAGE_SIZE)];
         }
         
@@ -553,9 +553,9 @@ int get_value(unsigned int vp, void *dst, size_t n){
         char* toStore = (char*) dst;
         for(j=0; j<n && j<PAGE_SIZE; j++){ 
             toStore[j+ (i*PAGE_SIZE)] = physicalAddress[j];
-            #ifdef DEBUG
-                printf("got: %c \n",toStore[j+ (i*PAGE_SIZE)]);
-            #endif
+            // #ifdef DEBUG
+            //     printf("got: %c \n",toStore[j+ (i*PAGE_SIZE)]);
+            // #endif
         }
         //dont need to break if j>n. i will be inc'd to >numOfPages and loop will end anyway
     }
@@ -565,6 +565,44 @@ int get_value(unsigned int vp, void *dst, size_t n){
 
 void mat_mult(unsigned int a, unsigned int b, unsigned int c, size_t l, size_t m, size_t n){
     //TODO: Finish
+    /*ALGORITHM + NOTES:
+        -use put_val and get_val to do it
+        -matrix c is where you store the resulting matrix
+        - mat a = l*m, mat b = m*n, mat c = l*n    
+    */
+   int** matrixA = translate(a);
+   //unsigned int matAUnsigned = (uintptr_t) matrixA;
+   int** matrixB = translate(b);
+   //unsigned int matBUnsigned = (uintptr_t) matrixB;
+   int** matrixC = translate(c);
+   //unsigned int matCUnsigned = (uintptr_t) matrixC;
+
+    for (int i = 0; i < l; i++) {
+        for (int j = 0; j < n; j++) {
+            //matrixC[i][j] = 0;
+            unsigned int matCUnsigned = (uintptr_t) (matrixC[i]+(j*sizeof(int)));
+            put_value(matCUnsigned, 0, sizeof(int));
+
+            for (int k = 0; k < m; k++) {
+                //matrixC[i][j] += matrixA[i][k] * matrixB[k][j];
+                unsigned int matAUnsigned = (uintptr_t) (matrixA[i]+(k*sizeof(int)));
+                unsigned int matBUnsigned = (uintptr_t) (matrixC[k]+(j*sizeof(int)));
+                int A_val;
+                get_value(matAUnsigned, &A_val, sizeof(int));
+                int B_val;
+                get_value(matBUnsigned, &B_val, sizeof(int));
+
+                put_value(matCUnsigned, 0, sizeof(int))
+            }
+            #ifdef DEBUG
+                printf("%d\t", matrixC[i][j]);
+            #endif
+        }
+        #ifdef DEBUG
+            printf("\n");   
+        #endif
+    }
+
 }
 
 // void add_TLB(unsigned int vpage, unsigned int ppage){
