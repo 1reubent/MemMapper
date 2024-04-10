@@ -577,6 +577,9 @@ void mat_mult(unsigned int a, unsigned int b, unsigned int c, size_t l, size_t m
    int** matrixC = translate(c);
    //unsigned int matCUnsigned = (uintptr_t) matrixC;
 
+    #ifdef DEBUG
+        printf("Final Matrix:\n");
+    #endif
     for (int i = 0; i < l; i++) {
         for (int j = 0; j < n; j++) {
             //matrixC[i][j] = 0;
@@ -587,12 +590,16 @@ void mat_mult(unsigned int a, unsigned int b, unsigned int c, size_t l, size_t m
                 //matrixC[i][j] += matrixA[i][k] * matrixB[k][j];
                 unsigned int matAUnsigned = (uintptr_t) (matrixA[i]+(k*sizeof(int)));
                 unsigned int matBUnsigned = (uintptr_t) (matrixC[k]+(j*sizeof(int)));
+                
                 int A_val;
                 get_value(matAUnsigned, &A_val, sizeof(int));
                 int B_val;
                 get_value(matBUnsigned, &B_val, sizeof(int));
+                int curr_val;
+                get_value(matCUnsigned, &curr_val, sizeof(int));
 
-                put_value(matCUnsigned, 0, sizeof(int))
+                int result = curr_val + (A_val * B_val);
+                put_value(matCUnsigned, &result, sizeof(int));
             }
             #ifdef DEBUG
                 printf("%d\t", matrixC[i][j]);

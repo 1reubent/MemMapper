@@ -65,7 +65,6 @@ int main(int argc, char **argv)
  
     // Function call
     mat_mult(m1, m2, m3, R1, C1, C2);
-    
  
    
     printf("WWWWWWWWWWWW\n");
