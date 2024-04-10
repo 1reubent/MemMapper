@@ -3,7 +3,7 @@
 #include <stdio.h>
 #include <stdint.h>
 
-#define PAGE_SIZE (1<<15) // Use a power of 2 >= 8KB (8192 or 2^13)
+#define PAGE_SIZE (1<<13) // Use a power of 2 >= 8KB (8192 or 2^13)
 #define PTE_SIZE 4 //DO NOT CHANGE. num of bytes in 1 pte. should be a factor of page size
 
 #define DEBUG
@@ -134,7 +134,7 @@ void set_physical_mem(){
     #endif
     //set each PTE in top page to -1 aka uninitialized.
     for(int i =0; i< (1<<numOuterBits); i++){
-        * (page0Int + (i * PTE_SIZE)) = -1;
+        * ((int*)(page0 + (i * PTE_SIZE))) = -1;
     }
 
 }
@@ -149,7 +149,7 @@ void set_physical_mem(){
 //for page_map(), on success, pageTableWalkr() should return NULL and toStorePhysicalPageNum should contain the physical page number.
 void* pageTableWalker(int topLevelIndex, int secondLevelIndex, int offset, unsigned int* toStorePhysicalPageNum){
     /*SEARCH OUTER PT FOR APPRPRIATE PTE*/
-    int* topLevelPTELocation = (int*) ( page0Int + ( topLevelIndex * PTE_SIZE) );
+    int* topLevelPTELocation = (int*) ( page0 + ( topLevelIndex * PTE_SIZE) );
     int secondLevelPageNum = *topLevelPTELocation;
         if(secondLevelPageNum == -1){ 
             //PTE is unititialized
@@ -161,7 +161,7 @@ void* pageTableWalker(int topLevelIndex, int secondLevelIndex, int offset, unsig
         }
 
     /*SEARCH INNER PT FOR APPRPRIATE PTE*/
-    int* secondLevelPTELocation = (int*) ( ( page0Int + ( secondLevelPageNum * PAGE_SIZE) ) + (secondLevelIndex * PTE_SIZE) );
+    int* secondLevelPTELocation = (int*) ( ( page0 + ( secondLevelPageNum * PAGE_SIZE) ) + (secondLevelIndex * PTE_SIZE) );
     int physicalPageNum = *secondLevelPTELocation;
         if(physicalPageNum == -1){
             //PTE is uninitialized
@@ -177,7 +177,7 @@ void* pageTableWalker(int topLevelIndex, int secondLevelIndex, int offset, unsig
         }
 
     /*GET PHYSICAL ADDRESS*/ 
-    char* physicalAddress = (char*) ( (page0Int + (physicalPageNum * PAGE_SIZE)) + offset );
+    char* physicalAddress = (void*) ( (page0 + (physicalPageNum * PAGE_SIZE)) + offset );
     return physicalAddress;
 
 }
@@ -253,8 +253,8 @@ unsigned int page_map(unsigned int vp){
         //if toInit greater than or equal to page0+PAGE_SIZE means second level PTE is unit-ed
 
         /*CHECK IF THE TOP-LEVEL PTE IS UNINITIALIZED*/
-        int* uninitPTEAddress = (int*) toInit;
-        if(uninitPTEAddress < page0Int + PAGE_SIZE){
+        //int* uninitPTEAddress = (int*) toInit;
+        if(toInit < (void*) (page0 + PAGE_SIZE)){
             //need to allocate top-level PTE's page
                 //search physicalBitmap for open page for second-level page table
                     //if not error
@@ -273,19 +273,19 @@ unsigned int page_map(unsigned int vp){
             #endif
             
             /*SET TOP-LEVEL PTE WITH PHYSICAL PAGE NUMBER OF NEWLY ALLOCATED SECOND-LEVEL PT */
-            *uninitPTEAddress = physicalPageNum;
+            *((int*)toInit) = physicalPageNum;
             
             /*SET EACH PTE IN NEW SECOND LEVEL PT TO -1 AKA UNINITIALIZED*/
-            uninitPTEAddress = page0Int+ (physicalPageNum*PAGE_SIZE);
+            toInit = (page0+ (physicalPageNum*PAGE_SIZE));
             for(int i =0; i< (numInnerBits<<1); i++){
-                *(uninitPTEAddress + (i * PTE_SIZE)) = -1;
+                *((int*)(toInit + (i * PTE_SIZE))) = -1;
             }
 
-            /*RESET PTR TO ADDRESS OF NEWLY ALLOCATED SECOND-LEVEL PT */
-            *uninitPTEAddress = physicalPageNum;
+            // /*RESET PTR TO ADDRESS OF NEWLY ALLOCATED SECOND-LEVEL PT */
+            // (int*)toInit = physicalPageNum;
         }
         /*CHECK IF THE SECOND-LEVEL PTE IS UNINITIALIZED*/
-        if(uninitPTEAddress >= page0Int+PAGE_SIZE){
+        if(toInit >= (void*) (page0+PAGE_SIZE)){
             //need to allocate second-level PTE's page
 
             /*ALLOCATE PHYSICAL PAGE FOR THE USER*/
@@ -300,7 +300,7 @@ unsigned int page_map(unsigned int vp){
             #endif
 
             /*INIT SECOND-LEVEL PTE WITH NEWLY ALLOCATED PHYSICAL PAGE NUMBER*/
-            *uninitPTEAddress = physicalPageNum;
+             *((int*)toInit) = physicalPageNum;
         }
 
     }
@@ -382,7 +382,7 @@ int t_free(unsigned int vp, size_t n){
         //unset the physical bit in bitmap (use previously obtained page # as index)
 
     /*CHECK ADDRESS VALIDITY*/
-    if(vp% PAGE_SIZE != 0 || vp+n >= MAX_MEMSIZE){
+    if(vp% PAGE_SIZE != 0 || vp+n >= MAX_MEMSIZE){ //vp% PAGE_SIZE != 0 || 
         //not an appropriate virtual address OR size.
         return -1;
     }
@@ -421,9 +421,9 @@ int t_free(unsigned int vp, size_t n){
         mask = ((1 << numOuterBits) - 1) << (numOffsetBits+numInnerBits);
             int outerPageNum = (vPageStartingAddress & mask) >> (numOffsetBits+numInnerBits);
         
-        int* topLevelPTELocation = (int*) ( page0Int + ( outerPageNum * PTE_SIZE) );
+        int* topLevelPTELocation = (int*) ( page0 + ( outerPageNum * PTE_SIZE) );
             int secondLevelPageNum = *topLevelPTELocation;
-        int* secondLevelPTELocation = (int*) ( ( page0Int + ( secondLevelPageNum * PAGE_SIZE) ) + (innerPageNum * PTE_SIZE) );
+        int* secondLevelPTELocation = (int*) ( ( page0 + ( secondLevelPageNum * PAGE_SIZE) ) + (innerPageNum * PTE_SIZE) );
             int physicalPageNum = *secondLevelPTELocation;
             //use later to uset physical bit
         
@@ -456,7 +456,12 @@ int put_value(unsigned int vp, void *val, size_t n){
     /*ALGROITHM:
         -check if address is valid:
             -address + n must be in VAS
-            -address must be at the start of a virtual page (multiple of PAGE SIZE)
+        -start copying bytes from val to vp.
+        -if you reach the end of a page, retranslate to find the next physical page and continue.
+            -find the smallest multiple of PAGE_SIZE greater than vp.
+            - PAGE_SIZE - (vp%PAGE_SIZE) = num of bytes remaining in current page
+        -if you reach n bytes, break
+
         -calculate numOfPages
         -for each page:
             -check if virtual page is currently allocated (virtual bit is set)
@@ -467,42 +472,41 @@ int put_value(unsigned int vp, void *val, size_t n){
     */
 
     /*CHECK ADDRESS VALIDITY*/
-    if(vp% PAGE_SIZE != 0 || vp+n >= MAX_MEMSIZE){
+    if(vp+n >= MAX_MEMSIZE){ //vp% PAGE_SIZE != 0 || 
         //not an appropriate virtual address OR size.
         return -1;
     }
-    //find num pages
-    int numOfPages =  (n+ PAGE_SIZE -1) / PAGE_SIZE;
 
-    /*FOR EACH PAGE ...*/
-    int j; 
-        //to hold next byte to copy when we reach end of page
-    for(int i=0; i<numOfPages; i++){
-        unsigned int vPageStartingAddress = vp + (i*PAGE_SIZE);
-        unsigned int virtualPageNum = vPageStartingAddress / PAGE_SIZE;
-            //this is also the index of the page in virtual bitmap
-        
-        /*CHECK IF PAGE IS CURRENTLY ALLOCATED*/
-        int oneMask = 1 << virtualPageNum;
-        if((*((int*)virtualBitmap) & oneMask) == 0){
-            //page is freed
-            return -1;
-        }
-
-        /*TRANSLATE VIRTUAL ADDRESS TO PHYSICAL ADDRESS*/
-        char* physicalAddress = translate(vPageStartingAddress);
-        
-        /*COPY DATA*/
-        char* toCopy = (char*) val;
-        for(j=0; j<n && j<PAGE_SIZE; j++){
-            // #ifdef DEBUG
-            //     printf("putting: %c \n",toCopy[j+ (i*PAGE_SIZE)]);
-            // #endif
-            physicalAddress[j] = toCopy[j+ (i*PAGE_SIZE)];
-        }
-        
-
+    unsigned int startingAddress = vp;
+    
+    /*CHECK IF PAGE IS CURRENTLY ALLOCATED*/ 
+    unsigned int virtualPageNum = (startingAddress - (startingAddress%PAGE_SIZE)) / PAGE_SIZE;
+    int oneMask = 1 << virtualPageNum;
+    if((*((int*)virtualBitmap) & oneMask) == 0){
+        //page is freed
+        return -1;
     }
+
+    /*COPY DATA TO PHYSICAL MEMORY*/
+    unsigned int numBytesRemainingInPage = PAGE_SIZE - (startingAddress%PAGE_SIZE);
+    char* physicalAddress = translate(startingAddress);
+    int byte_counter =0;
+    char* toCopy = (char*) val;
+    for(int i=0; i<n;i++){
+        if(byte_counter>=numBytesRemainingInPage){
+            //retranslate to get the next physical page
+            startingAddress+=byte_counter;
+            physicalAddress = translate(startingAddress);
+
+            numBytesRemainingInPage = PAGE_SIZE - (startingAddress%PAGE_SIZE);
+                //this should always be PAGE_SIZE anyway after the first page
+
+            byte_counter =0;
+        }
+        physicalAddress[byte_counter] = toCopy[i];
+        byte_counter++;
+    }
+    
     //at this point, all bytes of val should have been copied to physical page
     return 0;
 }
@@ -524,41 +528,41 @@ int get_value(unsigned int vp, void *dst, size_t n){
     */
 
     /*CHECK ADDRESS VALIDITY*/
-    if(vp% PAGE_SIZE != 0 || vp+n >= MAX_MEMSIZE){
+    if( vp+n >= MAX_MEMSIZE){ //vp% PAGE_SIZE != 0 ||
         //not an appropriate virtual address OR size.
         return -1;
     }
-    //find num pages
-    int numOfPages =  (n+ PAGE_SIZE -1) / PAGE_SIZE;
-
-    /*FOR EACH PAGE ...*/
-    int j; 
-        //to hold next byte to get when we reach end of page
-    for(int i=0; i<numOfPages; i++){
-        unsigned int vPageStartingAddress = vp + (i*PAGE_SIZE);
-        unsigned int virtualPageNum = vPageStartingAddress / PAGE_SIZE;
-            //this is also the index of the page in virtual bitmap
-        
-        /*CHECK IF PAGE IS CURRENTLY ALLOCATED*/
-        int oneMask = 1 << virtualPageNum;
-        if((*((int*)virtualBitmap) & oneMask) == 0){
-            //page is freed
-            return -1;
-        }
-
-        /*TRANSLATE VIRTUAL ADDRESS TO PHYSICAL ADDRESS*/
-        char* physicalAddress = translate(vPageStartingAddress);
-        
-        /*GET DATA*/
-        char* toStore = (char*) dst;
-        for(j=0; j<n && j<PAGE_SIZE; j++){ 
-            toStore[j+ (i*PAGE_SIZE)] = physicalAddress[j];
-            // #ifdef DEBUG
-            //     printf("got: %c \n",toStore[j+ (i*PAGE_SIZE)]);
-            // #endif
-        }
-        //dont need to break if j>n. i will be inc'd to >numOfPages and loop will end anyway
+    
+    unsigned int startingAddress = vp;
+    
+    /*CHECK IF PAGE IS CURRENTLY ALLOCATED*/ 
+    unsigned int virtualPageNum = (startingAddress - (startingAddress%PAGE_SIZE)) / PAGE_SIZE;
+    int oneMask = 1 << virtualPageNum;
+    if((*((int*)virtualBitmap) & oneMask) == 0){
+        //page is freed
+        return -1;
     }
+
+    /*COPY DATA FROM PHYSICAL MEMORY*/
+    unsigned int numBytesRemainingInPage = PAGE_SIZE - (startingAddress%PAGE_SIZE);
+    char* physicalAddress = translate(startingAddress);
+    int byte_counter =0;
+    char* toStore = (char*) dst;
+    for(int i=0; i<n;i++){
+        if(byte_counter>=numBytesRemainingInPage){
+            //retranslate to get the next physical page
+            startingAddress+=byte_counter;
+            physicalAddress = translate(startingAddress);
+
+            numBytesRemainingInPage = PAGE_SIZE - (startingAddress%PAGE_SIZE);
+                //this should always be PAGE_SIZE anyway after the first page
+
+            byte_counter =0;
+        }
+        toStore[i] = physicalAddress[byte_counter];
+        byte_counter++;
+    }
+    
     //at this point, all bytes of physical page should have been copied to dst
     return 0;
 }
@@ -570,39 +574,42 @@ void mat_mult(unsigned int a, unsigned int b, unsigned int c, size_t l, size_t m
         -matrix c is where you store the resulting matrix
         - mat a = l*m, mat b = m*n, mat c = l*n    
     */
-   int** matrixA = translate(a);
-   //unsigned int matAUnsigned = (uintptr_t) matrixA;
-   int** matrixB = translate(b);
-   //unsigned int matBUnsigned = (uintptr_t) matrixB;
-   int** matrixC = translate(c);
-   //unsigned int matCUnsigned = (uintptr_t) matrixC;
+//    unsigned int matrixA = (unsigned int) (uintptr_t)translate(a);
+//      //unsigned int matAUnsigned = (uintptr_t) matrixA;
+//    unsigned int matrixB = (unsigned int) (uintptr_t)translate(b);
+//      //unsigned int matBUnsigned = (uintptr_t) matrixB;
+//    unsigned int matrixC = (unsigned int) (uintptr_t)translate(c);
+//      //unsigned int matCUnsigned = (uintptr_t) matrixC;
 
     #ifdef DEBUG
-        printf("Final Matrix:\n");
+        printf("Resultant Matrix:\n");
     #endif
     for (int i = 0; i < l; i++) {
         for (int j = 0; j < n; j++) {
-            //matrixC[i][j] = 0;
-            unsigned int matCUnsigned = (uintptr_t) (matrixC[i]+(j*sizeof(int)));
-            put_value(matCUnsigned, 0, sizeof(int));
-
+            /*SET RESULTANT MATRIX VALUE TO 0*/
+            unsigned int matrixCIndex = c+(i*n*sizeof(int))+(j*sizeof(int));
+            int C_val =0;
+            put_value(matrixCIndex, &C_val, sizeof(int));
+            
             for (int k = 0; k < m; k++) {
-                //matrixC[i][j] += matrixA[i][k] * matrixB[k][j];
-                unsigned int matAUnsigned = (uintptr_t) (matrixA[i]+(k*sizeof(int)));
-                unsigned int matBUnsigned = (uintptr_t) (matrixC[k]+(j*sizeof(int)));
+                unsigned int matrixAIndex = a+(i*m*sizeof(int))+(k*sizeof(int));
+                unsigned int matrixBIndex = b+(k*n*sizeof(int))+(j*sizeof(int));
                 
+                /*MULTIPLY SPECIFIC MATRIX ELEMENTS AND STORE IN RESULTANT MATRIX*/
                 int A_val;
-                get_value(matAUnsigned, &A_val, sizeof(int));
+                get_value(matrixAIndex, &A_val, sizeof(int));
                 int B_val;
-                get_value(matBUnsigned, &B_val, sizeof(int));
+                get_value(matrixBIndex, &B_val, sizeof(int));
                 int curr_val;
-                get_value(matCUnsigned, &curr_val, sizeof(int));
+                get_value(matrixCIndex, &curr_val, sizeof(int));
 
                 int result = curr_val + (A_val * B_val);
-                put_value(matCUnsigned, &result, sizeof(int));
+                put_value(matrixCIndex, &result, sizeof(int));
             }
             #ifdef DEBUG
-                printf("%d\t", matrixC[i][j]);
+                int temp;
+                get_value(matrixCIndex, &temp, sizeof(int));
+                printf("%d\t", temp);
             #endif
         }
         #ifdef DEBUG

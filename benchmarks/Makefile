@@ -1,5 +1,5 @@
 CC = gcc
-CFLAGS = -g -m32 -w -Wall -Wvla -Werror
+CFLAGS = -g -m32 -w -Wall -Wvla -Werror -fsanitize=address,undefined
 
 all: clean test mat_test
 
