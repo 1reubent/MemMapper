@@ -4,7 +4,7 @@
 
 #define MAX_MEMSIZE (1ULL<<32)
 #define MEMSIZE (1ULL<<30)
-#define TLB_ENTRIES 256
+#define TLB_ENTRIES 2
 
 
 void set_physical_mem();

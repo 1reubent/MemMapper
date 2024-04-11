@@ -6,7 +6,7 @@
 
 
 #define PAGE_SIZE 1<<13
-#define LOOP_NUM 3
+#define LOOP_NUM 50
 #define BUF_SIZE 5 //in bytes. num of chars in array
 
 #define R1 4 // number of rows in M1
@@ -69,7 +69,7 @@ int main(int argc, char **argv)
     //MULTIPLY MATRICIES
     mat_mult((unsigned int)(uintptr_t)m1, (unsigned int)(uintptr_t)m2, (unsigned int)(uintptr_t)m3, R1, C1, C2);
  
-   
-    printf("WWWWWWWWWWWW\n");
+    printf("\n");
+    print_TLB_missrate();
     return 0;
 }

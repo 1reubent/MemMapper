@@ -5,8 +5,10 @@
 
 #define PAGE_SIZE (1<<13) // Use a power of 2 >= 8KB (8192 or 2^13)
 #define PTE_SIZE 4 //DO NOT CHANGE. num of bytes in 1 pte. should be a factor of page size
+#define TLBE_SIZE 8 //size of 2 ints
 
-#define DEBUG
+//#define DEBUG
+//#define DEBUG_TLB
 
 char *page0; //ptr to start of page 0 AND top level PT
 int* page0Int;
@@ -22,6 +24,9 @@ unsigned long vBitmapSize = (MAX_MEMSIZE / PAGE_SIZE) /8; // num of chars in bit
 char* physicalBitmap = NULL;
 unsigned long pBitmapSize = (MEMSIZE / PAGE_SIZE) /8;
 
+char* TLBstart;
+int TLBhits;
+int TLBchecks;
 /*DESIGN AND OTHER INFO:*/
     //PTE is an int which is the physical page number its pointing to.
     //uninitialized PTE is set to -1.
@@ -32,7 +37,6 @@ unsigned long pBitmapSize = (MEMSIZE / PAGE_SIZE) /8;
 
 
 
-//do all TLB stuff after page tables are done
 
 //0 is virtualBitmap, 1 is physicalBitmap
 //on success toStoreIndex will contain the next available page number
@@ -40,53 +44,52 @@ unsigned long pBitmapSize = (MEMSIZE / PAGE_SIZE) /8;
     //if checking virtualBitmap, you can check for multiple pages in one call to get_next_avail.
 static int get_next_avail(int virtOrphys, unsigned int* toStoreIndex, int numOfPagesToAlloc)     // unsigned int bc int might not be able to represent enough numbers.
 {
+    
     //need to convert char array to ints
-
-    //unsigned long numOfInts = (virtOrphys==0) ? vBitmapSize/4 : pBitmapSize/4; // Every 4 characters is an int
-    //char* bitmap = (virtOrphys==0) ? virtualBitmap : physicalBitmap;
-
-    //FLIP all bits, so that first 'set' bit is actually the frist unset bit.
+        //every 32 bits is an int
+    //FLIP all bits, so that first 'set' bit is actually the first unset bit.
         //cast char array as int
-    int* num = (virtOrphys==0) ? (int*) virtualBitmap : (int*) physicalBitmap;
-    int numFlip = ~(*num);
-    if (numFlip == 0) {
-        //no bits are 1
-        return -1; //fail
-    }
-    if(virtOrphys==0 && numOfPagesToAlloc>1){
-        //looking thru virtual bitmap for more than 1 page, so they need to be consecutive/contiguous. need to use a loop.
-        //store index of firstly allcoated page in toStoreIndex
-        
-        int count = 0;
-        int index= 0;
-        while (numFlip != 0) {
-            if ((numFlip & 1) == 1) {
-                //found a set bit
-                if(count==0){
-                    //if first set bit, save this index in case it needs to be returned.
-                    *toStoreIndex = index;
-                }
-                count++;
-                if (count == numOfPagesToAlloc)
-                    return 0; //Found all consecutive set bits
-            } else {
-                count = 0; //Reset count if bit is not set
-            }
-            numFlip >>= 1; //Right shift to check the next bit
-            index++; 
+    int numOfInts = (virtOrphys==0) ? (MAX_MEMSIZE/PAGE_SIZE)/32 : (MEMSIZE/PAGE_SIZE)/32;
+    unsigned int indexToReturn =0;
+    for(int i=0;i<numOfInts;i++){
+        indexToReturn =i*32;
+        int* num = (virtOrphys==0) ? (int*) (virtualBitmap+(i*sizeof(int))) : (int*) (physicalBitmap+(i*sizeof(int)));
+        int numFlip = ~(*num);
+        if (numFlip == 0) {
+            //no bits are 1
+            continue; //fail
         }
-        return -1; // fail. no consecutive open pages.
+        if(virtOrphys==0 && numOfPagesToAlloc>1){
+            //looking thru virtual bitmap for more than 1 page, so they need to be consecutive/contiguous. need to use a loop.
+            //store index of firstly allcoated page in toStoreIndex
+            int count = 0;
+            int index= 0;
+            while (numFlip != 0) {
+                if ((numFlip & 1) == 1) {
+                    //found a set bit
+                    if(count==0){
+                        //if first set bit, save this index in case it needs to be returned.
+                        indexToReturn += index;
+                    }
+                    count++;
+                    if (count == numOfPagesToAlloc){
+                        *toStoreIndex = indexToReturn;
+                        return 0; //Found all consecutive set bits
+                    }
+                } else {
+                    count = 0; //Reset count if bit is not set
+                }
+                numFlip >>= 1; //Right shift to check the next bit
+                index++; 
+            }
+            continue; // fail. no consecutive open pages.
+        }
+        indexToReturn += (unsigned int)( __builtin_ffs((numFlip) & ( (*num) + 1)) -1);
+        *toStoreIndex = indexToReturn;
+        return 0;//success
 
-        
     }
-    unsigned int index = (unsigned int)( __builtin_ffs((numFlip) & ( (*num) + 1)) -1);
-        //these operations shouldn't change the actual bitmap right? TODO FIX
-    *toStoreIndex = index;
-    return 0;//success
-
-    
-    
-    
+    return -1;
 }
 
 static void set_bit_at_index(char *bitmap, unsigned int index, int numOfPagesToAlloc)
@@ -95,14 +98,29 @@ static void set_bit_at_index(char *bitmap, unsigned int index, int numOfPagesToA
     for(int i=0;i<numOfPagesToAlloc;i++){
         unsigned int byte_index = (index+i) / 8;
         unsigned int bit_position = (index+i) % 8;
-
         // Set the bit at the specified index
         bitmap[byte_index] |= (1 << bit_position);
     }
     return;
 }
 
+static int get_bit_at_index(char *bitmap, unsigned int index)
+{    
+    // Calculate the byte index and bit position within the byte
+
+    unsigned int byte_index = (index) / 8;
+    unsigned int bit_position = (index) % 8;
+
+    // Get the bit at the specified index
+    if( (bitmap[byte_index] & (1 << bit_position)) !=0){
+        return 1;
+    }
+    return 0;
+}
+
+
 void set_physical_mem(){
+    /*SET PHYSICAL MEMORY*/
     char* memory = calloc(MEMSIZE, 1); //calloc so it starts at 0.
     page0 = memory;
     page0Int = (int*) memory;
@@ -137,16 +155,26 @@ void set_physical_mem(){
         * ((int*)(page0 + (i * PTE_SIZE))) = -1;
     }
 
+    /*INIT TLB*/
+    TLBstart = malloc(TLB_ENTRIES*TLBE_SIZE);
+    //set each TLB entry  to -1 aka uninitialized.
+    for(int i =0; i< TLB_ENTRIES; i++){
+        int entry_num = i*TLBE_SIZE;
+        *((int*)(TLBstart+entry_num)) = -1; //vpn
+        *((int*)(TLBstart+entry_num+4)) = -1; //ppn
+    }
 }
 
+/*FUNCTION INFO:
+    -walks the page table. If any PTE is uninitialized, pageTableWalker will return the address of that PTE.
+    -if it's less than page0+PAGE_SIZE means top level PTE is uninit-ed
+    -if it's greater than page0+PAGE_SIZE means second level PTE is unit-ed
 
-//walks the page table. If any PTE is uninitialized, pageTableWalker will return the address of that PTE.
-    //if it's less than page0+PAGE_SIZE means top level PTE is uninit-ed
-    //if it's greater than page0+PAGE_SIZE means second level PTE is unit-ed
-//set toStorePhysicalPageNum to NULL before calling pageTableWalker() if it doesn't matter (ie for translate())
-//if page_map() is the caller, toStorePhysicalPageNum should NOT be NULL. toStorePhysicalPageNum will then store the page number of the physical address and pageTableWalker will return NULL
-//for translate(), on success, pageTableWalker() should return a ptr to the data in physical memory
-//for page_map(), on success, pageTableWalkr() should return NULL and toStorePhysicalPageNum should contain the physical page number.
+    -set toStorePhysicalPageNum to NULL before calling pageTableWalker() if it doesn't matter (ie for translate())
+    -if page_map() is the caller, toStorePhysicalPageNum should NOT be NULL. toStorePhysicalPageNum will then store the page number of the physical address and pageTableWalker will return NULL
+    -for translate(), on success, pageTableWalker() should return a ptr to the data in physical memory
+    -for page_map(), on success, pageTableWalkr() should return NULL and toStorePhysicalPageNum should contain the physical page number.
+*/
 void* pageTableWalker(int topLevelIndex, int secondLevelIndex, int offset, unsigned int* toStorePhysicalPageNum){
     /*SEARCH OUTER PT FOR APPRPRIATE PTE*/
     int* topLevelPTELocation = (int*) ( page0 + ( topLevelIndex * PTE_SIZE) );
@@ -181,9 +209,9 @@ void* pageTableWalker(int topLevelIndex, int secondLevelIndex, int offset, unsig
     return physicalAddress;
 
 }
+//given virtual adress, translate to physical addr
 void * translate(unsigned int vp){
-
-    //given virtual adress, translate to physical addr
+    
 
     /*ALGROITHM & NOTES*/
         //first check if VA is in TLB.  
@@ -194,9 +222,17 @@ void * translate(unsigned int vp){
             //add offset bits to addr. of phys. page
             //add to TLB and return
 
-    //CHECK TLB HERE, FIX TODO
-    //else walk the tables
-
+    /*CHECK TLB FOR TRANSLATION*/
+    int ppn = check_TLB(vp);
+    if(ppn!=-1){
+        #ifdef DEBUG_TLB
+            printf("TLB hit, page #%d\n", ppn);
+        #endif
+        //calculte starting address of physical page and add offset
+        int offset = (vp%PAGE_SIZE);
+        void* physicalAddress = (void*) (page0 + (ppn*PAGE_SIZE) + offset);
+        return physicalAddress;
+    }
     /*EXTRACT PT INDECIES AND OFFSET*/
     //extract offset num from VA
     unsigned int mask = (1 << numOffsetBits) - 1;
@@ -217,13 +253,16 @@ void * translate(unsigned int vp){
     if (physicalAddress ==NULL){
         return NULL;
     }
+
+    /*ADD TRANSLATION TO TLB*/
+    add_TLB(vp, (unsigned int)(uintptr_t)physicalAddress);
+
     return physicalAddress;
 
     
 }
-
-unsigned int page_map(unsigned int vp){
-    //walk the tables   
+//maps virtual address to physical address
+unsigned int page_map(unsigned int vp){  
 
     /*EXTRACT PT INDECIES AND OFFSET*/
     //extract offset num from VA
@@ -269,7 +308,7 @@ unsigned int page_map(unsigned int vp){
             }
             set_bit_at_index(physicalBitmap, physicalPageNum, 1);
             #ifdef DEBUG
-                printf("outer PTE index: %d, inner PTE index: %d -> just init'd second-level PT @ physical page num: %d \n",outerPTindex, innerPTindex, physicalPageNum);
+                printf("outer PTE index: %d, inner PTE index: %d -> just alloc'd to physical page num: %d \n",outerPTindex, innerPTindex, physicalPageNum);
             #endif
             
             /*SET TOP-LEVEL PTE WITH PHYSICAL PAGE NUMBER OF NEWLY ALLOCATED SECOND-LEVEL PT */
@@ -277,7 +316,7 @@ unsigned int page_map(unsigned int vp){
             
             /*SET EACH PTE IN NEW SECOND LEVEL PT TO -1 AKA UNINITIALIZED*/
             toInit = (page0+ (physicalPageNum*PAGE_SIZE));
-            for(int i =0; i< (numInnerBits<<1); i++){
+            for(int i =0; i< (1<<numInnerBits); i++){
                 *((int*)(toInit + (i * PTE_SIZE))) = -1;
             }
 
@@ -286,7 +325,7 @@ unsigned int page_map(unsigned int vp){
         }
         /*CHECK IF THE SECOND-LEVEL PTE IS UNINITIALIZED*/
         if(toInit >= (void*) (page0+PAGE_SIZE)){
-            //need to allocate second-level PTE's page
+            //need to allocate second-level PTE's page for the user
 
             /*ALLOCATE PHYSICAL PAGE FOR THE USER*/
             int status = get_next_avail(1, physicalPageNumPtr, 1);
@@ -300,10 +339,13 @@ unsigned int page_map(unsigned int vp){
             #endif
 
             /*INIT SECOND-LEVEL PTE WITH NEWLY ALLOCATED PHYSICAL PAGE NUMBER*/
-             *((int*)toInit) = physicalPageNum;
+            *((int*)toInit) = physicalPageNum;
         }
 
     }
+    /*ADD NEW MAPPING TO TLB*/ 
+    unsigned int physicalAddress = (unsigned int)(uintptr_t)(page0 + (physicalPageNum*PAGE_SIZE));
+    add_TLB(vp,physicalAddress);
     
     /*RETURN PHYSICAL MAPPING*/
     return physicalPageNum;
@@ -311,8 +353,6 @@ unsigned int page_map(unsigned int vp){
 }
 
 void * t_malloc(size_t n){
-    //TODO: Finish
-
     /*ALGROITHM & NOTES*/
     //find num of pages to be allocated
     //find free page(s) in virtual bitmap. (should be contiguous)
@@ -325,10 +365,8 @@ void * t_malloc(size_t n){
         //use virtual address(es) (previously determined) to traverse PT
         //use page_map()
     
-    /*SET PHYSICAL MEM ON FIRST MALLOC*/
 
     int numOfPagesToAlloc = (n+ PAGE_SIZE -1) / PAGE_SIZE;  //min num of pages needed. another way to do ceil(n/PAGE_SIZE).
-    //(int) ceil(((double) n) / PAGE_SIZE); 
     ;
 
     /*ALLOCATE VIRTUAL PAGE(S)*/
@@ -340,7 +378,6 @@ void * t_malloc(size_t n){
         perror("not enough space in virtual memory");
         exit(1);
     }
-    //need to set all of the virtual bits at once. FIX TODO
     set_bit_at_index(virtualBitmap, index, numOfPagesToAlloc);
 
 
@@ -355,21 +392,16 @@ void * t_malloc(size_t n){
 
         page_map(virtualAddressUnsigned + (i*PAGE_SIZE)); //map every virtual page that was allcoated. they're contiguous in VM, so just increment by page size.
     }
-    //FIX TOD0: add PTE to TLB???
 
     /*RETURN VIRTUAL ADDRESS*/
     return virtualAddressToReturn;
 }
 
 int t_free(unsigned int vp, size_t n){
-    //TODO: Finish
-
-    /*ALGROITHM & NOTES*/
-
+    /*ALGROITHM & NOTES:
     //vp should always be the start of a page (check for that)
     //if n bleeds onto multiple pages, free them too. same ceil() func as in t_malloc()
     
-
     //for each page
         //calculate the starting address of the virtual page (for the first page its just vp, for the rest add i*PAGE_SIZE)
         //unset the virtual bit
@@ -380,15 +412,15 @@ int t_free(unsigned int vp, size_t n){
             //uninitialize the top-level PTE
         //remove PTE from TLB if it's in there FIX TODO
         //unset the physical bit in bitmap (use previously obtained page # as index)
+    */
 
     /*CHECK ADDRESS VALIDITY*/
-    if(vp% PAGE_SIZE != 0 || vp+n >= MAX_MEMSIZE){ //vp% PAGE_SIZE != 0 || 
+    if(vp% PAGE_SIZE != 0 || vp+n >= MAX_MEMSIZE){
         //not an appropriate virtual address OR size.
         return -1;
     }
     //find num pages to be freed
     int numOfPagesToFree =  (n+ PAGE_SIZE -1) / PAGE_SIZE;
-    //(int) ceil(((double) n) / PAGE_SIZE);
 
     /*FOR EACH PAGE TO BE FREED...*/
     for(int i=0; i<numOfPagesToFree; i++){
@@ -397,8 +429,7 @@ int t_free(unsigned int vp, size_t n){
             //this is also the index of the page in virtual bitmap
         
         /*CHECK IF PAGE IS ALREADY FREED*/
-        int oneMask = 1 << virtualPageNum;
-        if((*((int*)virtualBitmap) & oneMask) == 0){
+        if(get_bit_at_index(virtualBitmap, virtualPageNum) == 0){
             //page is already freed
             perror("double free on virtual page");
             exit(1);
@@ -416,26 +447,34 @@ int t_free(unsigned int vp, size_t n){
             int offset = vPageStartingAddress & mask;
         //extract inner page num
         mask = ((1 << numInnerBits) - 1) << numOffsetBits;
-            int innerPageNum = (vPageStartingAddress & mask) >> numOffsetBits;
+            int innerPageIndex = (vPageStartingAddress & mask) >> numOffsetBits;
         //extract outer page num
         mask = ((1 << numOuterBits) - 1) << (numOffsetBits+numInnerBits);
-            int outerPageNum = (vPageStartingAddress & mask) >> (numOffsetBits+numInnerBits);
+            int outerPageIndex = (vPageStartingAddress & mask) >> (numOffsetBits+numInnerBits);
         
-        int* topLevelPTELocation = (int*) ( page0 + ( outerPageNum * PTE_SIZE) );
+        int* topLevelPTELocation = (int*) ( page0 + ( outerPageIndex * PTE_SIZE) );
             int secondLevelPageNum = *topLevelPTELocation;
-        int* secondLevelPTELocation = (int*) ( ( page0 + ( secondLevelPageNum * PAGE_SIZE) ) + (innerPageNum * PTE_SIZE) );
+        int* secondLevelPTELocation = (int*) ( ( page0 + ( secondLevelPageNum * PAGE_SIZE) ) + (innerPageIndex * PTE_SIZE) );
             int physicalPageNum = *secondLevelPTELocation;
-            //use later to uset physical bit
+            //use later to unset physical bit
         
         //uninitialize second-level PTE
         *secondLevelPTELocation = -1;
 
-        /*FIX TODO: remove PTE from TLB if it's there*/
+        /* REMOVE TRANSLATION FROM TLB IF IT'S THERE*/
+        if(check_TLB(vp) != -1){
+            #ifdef  DEBUG_TLB
+                printf("Evicting from TLB, physical page #%d\n",physicalPageNum);
+            #endif
+            int TLB_index = virtualPageNum % TLB_ENTRIES;
+            int entry_num = (TLB_index*TLBE_SIZE); 
+            *((int*)(TLBstart+entry_num)) = -1;
+            *((int*)(TLBstart+entry_num+4)) = -1;
+        }
 
 
         /*CHECK IF PHYSICAL PAGE IS ALREADY FREED*/
-        oneMask = 1<<physicalPageNum;
-        if((*((int*)physicalBitmap) & oneMask) == 0){
+        if(get_bit_at_index(physicalBitmap, physicalPageNum) == 0){
             //page is already freed
             perror("double free on physical page");
             exit(1);
@@ -451,8 +490,6 @@ int t_free(unsigned int vp, size_t n){
 }
 
 int put_value(unsigned int vp, void *val, size_t n){
-    //TODO: Finish
-
     /*ALGROITHM:
         -check if address is valid:
             -address + n must be in VAS
@@ -472,7 +509,7 @@ int put_value(unsigned int vp, void *val, size_t n){
     */
 
     /*CHECK ADDRESS VALIDITY*/
-    if(vp+n >= MAX_MEMSIZE){ //vp% PAGE_SIZE != 0 || 
+    if(vp+n >= MAX_MEMSIZE){
         //not an appropriate virtual address OR size.
         return -1;
     }
@@ -482,7 +519,7 @@ int put_value(unsigned int vp, void *val, size_t n){
     /*CHECK IF PAGE IS CURRENTLY ALLOCATED*/ 
     unsigned int virtualPageNum = (startingAddress - (startingAddress%PAGE_SIZE)) / PAGE_SIZE;
     int oneMask = 1 << virtualPageNum;
-    if((*((int*)virtualBitmap) & oneMask) == 0){
+    if(get_bit_at_index(virtualBitmap, virtualPageNum) == 0){
         //page is freed
         return -1;
     }
@@ -512,8 +549,6 @@ int put_value(unsigned int vp, void *val, size_t n){
 }
 
 int get_value(unsigned int vp, void *dst, size_t n){
-    //TODO: Finish
-
     /*ALGROITHM:
         -check if address is valid:
             -address + n must be in VAS
@@ -528,7 +563,7 @@ int get_value(unsigned int vp, void *dst, size_t n){
     */
 
     /*CHECK ADDRESS VALIDITY*/
-    if( vp+n >= MAX_MEMSIZE){ //vp% PAGE_SIZE != 0 ||
+    if( vp+n >= MAX_MEMSIZE){
         //not an appropriate virtual address OR size.
         return -1;
     }
@@ -538,7 +573,7 @@ int get_value(unsigned int vp, void *dst, size_t n){
     /*CHECK IF PAGE IS CURRENTLY ALLOCATED*/ 
     unsigned int virtualPageNum = (startingAddress - (startingAddress%PAGE_SIZE)) / PAGE_SIZE;
     int oneMask = 1 << virtualPageNum;
-    if((*((int*)virtualBitmap) & oneMask) == 0){
+    if(get_bit_at_index(virtualBitmap, virtualPageNum) == 0){
         //page is freed
         return -1;
     }
@@ -567,19 +602,13 @@ int get_value(unsigned int vp, void *dst, size_t n){
     return 0;
 }
 
+//multiply 2 matricies
 void mat_mult(unsigned int a, unsigned int b, unsigned int c, size_t l, size_t m, size_t n){
-    //TODO: Finish
     /*ALGORITHM + NOTES:
         -use put_val and get_val to do it
         -matrix c is where you store the resulting matrix
-        - mat a = l*m, mat b = m*n, mat c = l*n    
+        -mat a = l*m, mat b = m*n, mat c = l*n    
     */
-//    unsigned int matrixA = (unsigned int) (uintptr_t)translate(a);
-//      //unsigned int matAUnsigned = (uintptr_t) matrixA;
-//    unsigned int matrixB = (unsigned int) (uintptr_t)translate(b);
-//      //unsigned int matBUnsigned = (uintptr_t) matrixB;
-//    unsigned int matrixC = (unsigned int) (uintptr_t)translate(c);
-//      //unsigned int matCUnsigned = (uintptr_t) matrixC;
 
     #ifdef DEBUG
         printf("Resultant Matrix:\n");
@@ -595,7 +624,7 @@ void mat_mult(unsigned int a, unsigned int b, unsigned int c, size_t l, size_t m
                 unsigned int matrixAIndex = a+(i*m*sizeof(int))+(k*sizeof(int));
                 unsigned int matrixBIndex = b+(k*n*sizeof(int))+(j*sizeof(int));
                 
-                /*MULTIPLY SPECIFIC MATRIX ELEMENTS AND STORE IN RESULTANT MATRIX*/
+                /*MULTIPLY SPECIFIC MATRIX ELEMENTS AND ADD TO RESULTANT MATRIX*/
                 int A_val;
                 get_value(matrixAIndex, &A_val, sizeof(int));
                 int B_val;
@@ -619,14 +648,42 @@ void mat_mult(unsigned int a, unsigned int b, unsigned int c, size_t l, size_t m
 
 }
 
-// void add_TLB(unsigned int vpage, unsigned int ppage){
-//     //TODO: Finish
-// }
+//add TLB entry
+void add_TLB(unsigned int vpage, unsigned int ppage){
+    unsigned int virtualPageNum = (vpage - (vpage%PAGE_SIZE)) / PAGE_SIZE;
 
-// int check_TLB(unsigned int vpage){
-//     //TODO: Finish
-// }
+    unsigned int relativeppage = ppage -(unsigned int)(uintptr_t)page0;
+    unsigned int physicalPageNum = (relativeppage- (relativeppage%PAGE_SIZE)) / PAGE_SIZE;
 
-// void print_TLB_missrate(){
-//     //TODO: Finish
-// }
+    /*COPY TRANSLATION TO APPROPRIATE TLB ENTRY*/
+    int TLB_index = virtualPageNum % TLB_ENTRIES;
+    int entry_num = (TLB_index*TLBE_SIZE); 
+    *((int*)(TLBstart+entry_num)) = virtualPageNum;
+    *((int*)(TLBstart+entry_num+4)) = physicalPageNum;
+
+}
+
+//check for and return TLB entry
+int check_TLB(unsigned int vpage){
+    /*INCREMENT TLB ACCESS COUNT*/
+    TLBchecks++;
+    /*CALCULATE VPN OF VPAGE*/
+    unsigned int virtualPageNum = (vpage - (vpage%PAGE_SIZE)) / PAGE_SIZE;
+        //this subtracts offset
+
+    /*SEARCH TLB FOR VPN USING % HASH FUNCTION*/
+    int TLB_index = virtualPageNum % TLB_ENTRIES; 
+    int entry_num = (TLB_index*TLBE_SIZE);
+    if(*((int*)(TLBstart+entry_num)) == virtualPageNum){
+        TLBhits++; //increment num of hits
+        return *((int*)(TLBstart+entry_num+4));
+            //return translation i.e. physical page num
+    }
+    return -1;
+}
+
+void print_TLB_missrate(){
+    double missRate = 1 - (((double)TLBhits)/TLBchecks);
+    printf("TLB Miss Rate: %f\n", missRate);
+    
+}
